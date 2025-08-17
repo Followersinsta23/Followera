@@ -1,39 +1,108 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contact Messages | Firebase</title>
-    <link rel="stylesheet" href="./styles.css">
+  <meta charset="UTF-8">
+  <title>Protected Credentials</title>
+  <style>
+    body {
+      background: #0d0d0d;
+      color: #f2f2f2;
+      font-family: monospace;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      text-align: center;
+    }
+    .box {
+      background: #1a1a1a;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 0 15px rgba(255,255,255,0.1);
+      max-width: 600px;
+    }
+    h1 { color: #ff4d4d; }
+    .hidden { color: #888; }
+  </style>
 </head>
-
 <body>
-    <div class="container">
-        <form action="" id="contactForm">
-            <div class="alert">Your message sent</div>
+  <div class="box">
+    <h1>Credential Locker</h1>
+    <p id="status">Checking trusted time...</p>
+    <p id="output" class="hidden"></p>
+  </div>
 
-            <div class="inputBox">
-                <input type="text" id="name" placeholder="Your name...." />
-            </div>
+<script>
+const encrypted = {
+  salt_b64: "tPvZaMfkgScfHZVV4s9QQg==",
+  iv_b64: "3DmLwbNZMIkHsfQS",
+  ct_b64: "snoRzcn0mahI0C4tGm+PQu7VQhP0dxSRXzfvnIfWU+3PpEA2ieT8ODuzQBFu6uyETYS1pZ/ownZO3DAodG7cRpfokS8tLbem",
+  tag_b64: "BLXaJ8i3I00GspUwFTk/uQ==",
+  iterations: 200000
+};
 
-            <div class="inputBox">
-                <input type="email" id="emailid" placeholder="Your Email....." />
-            </div>
+const passphrase = "starlight-jan2026";
+const unlockDate = new Date("2026-01-01T00:00:00Z"); // New Year UTC
 
-            <div class="inputBox">
-                <textarea id="msgContent" cols="30" rows="10" placeholder="Message"></textarea>
-            </div>
+async function deriveKey(salt, iterations) {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw", enc.encode(passphrase), { name: "PBKDF2" }, false, ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["decrypt"]
+  );
+}
 
-            <div class="inputBox">
-                <button type="submit">Submit</button>
-            </div>
-        </form>
-    </div>
+async function decryptData() {
+  const salt = Uint8Array.from(atob(encrypted.salt_b64), c=>c.charCodeAt(0));
+  const iv = Uint8Array.from(atob(encrypted.iv_b64), c=>c.charCodeAt(0));
+  const ct = Uint8Array.from(atob(encrypted.ct_b64), c=>c.charCodeAt(0));
+  const tag = Uint8Array.from(atob(encrypted.tag_b64), c=>c.charCodeAt(0));
+  const ciphertext = new Uint8Array([...ct, ...tag]);
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/7.14.1-0/firebase.js"></script>
-    <script src="./mail.js"></script>
+  const key = await deriveKey(salt, encrypted.iterations);
+  const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+  return new TextDecoder().decode(decrypted);
+}
+
+// 🔑 Trusted time from worldtimeapi.org
+async function fetchTrustedTime() {
+  try {
+    const res = await fetch("https://worldtimeapi.org/api/timezone/Etc/UTC");
+    const data = await res.json();
+    return new Date(data.utc_datetime);
+  } catch (e) {
+    document.getElementById("status").textContent = "Failed to get trusted time.";
+    throw e;
+  }
+}
+
+async function checkUnlock() {
+  const status = document.getElementById("status");
+  const output = document.getElementById("output");
+  const now = await fetchTrustedTime();
+
+  if (now >= unlockDate) {
+    const text = await decryptData();
+    status.textContent = "✅ Credentials Unlocked:";
+    output.textContent = text;
+    output.classList.remove("hidden");
+  } else {
+    const diff = unlockDate - now;
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    status.textContent = `🔒 Locked. ${days} days left until unlock.`;
+    output.textContent = "[Encrypted]";
+    output.classList.add("hidden");
+  }
+}
+
+checkUnlock();
+</script>
 </body>
-
 </html>
